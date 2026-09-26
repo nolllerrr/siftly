@@ -105,10 +105,21 @@ fn absolute_source(source: &str) -> Result<PathBuf, String> {
     fs::canonicalize(source).map_err(|error| format!("Cannot resolve source folder: {error}"))
 }
 
-struct ScanLimits { files: usize, errors: usize, directories: usize, checked: u64 }
+struct ScanLimits {
+    files: usize,
+    errors: usize,
+    directories: usize,
+    checked: u64,
+}
 impl Default for ScanLimits {
-    fn default() -> Self { Self { files: crate::security::MAX_FILES, errors: crate::security::MAX_ERRORS,
-        directories: crate::security::MAX_DIRECTORIES, checked: crate::security::MAX_CHECKED } }
+    fn default() -> Self {
+        Self {
+            files: crate::security::MAX_FILES,
+            errors: crate::security::MAX_ERRORS,
+            directories: crate::security::MAX_DIRECTORIES,
+            checked: crate::security::MAX_CHECKED,
+        }
+    }
 }
 
 pub fn scan_files<C, P>(
@@ -123,7 +134,12 @@ where
     scan_files_bounded(request, is_cancelled, on_progress, ScanLimits::default())
 }
 
-fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(request: ScanRequest, is_cancelled: C, mut on_progress: P, limits: ScanLimits) -> Result<ScanResult, String> {
+fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(
+    request: ScanRequest,
+    is_cancelled: C,
+    mut on_progress: P,
+    limits: ScanLimits,
+) -> Result<ScanResult, String> {
     let started = Instant::now();
     let source_path = absolute_source(&request.source)?;
     if !source_path.is_dir() {
@@ -133,7 +149,9 @@ fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(request: ScanRequ
     let allowed = normalize_extensions(&request.extensions);
     let date_from = parse_boundary(request.date_from.as_deref(), "date_from")?;
     let date_to = parse_boundary(request.date_to.as_deref(), "date_to")?;
-    if date_from.zip(date_to).is_some_and(|(from, to)| from > to) { return Err("Invalid date range".into()); }
+    if date_from.zip(date_to).is_some_and(|(from, to)| from > to) {
+        return Err("Invalid date range".into());
+    }
     let mut files = Vec::new();
     let mut errors = Vec::new();
     let mut files_checked = 0_u64;
@@ -143,7 +161,10 @@ fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(request: ScanRequ
     let mut directories = vec![source_path.clone()];
 
     'scan: while let Some(directory) = directories.pop() {
-        if errors.len() >= limits.errors { truncated = true; break; }
+        if errors.len() >= limits.errors {
+            truncated = true;
+            break;
+        }
         if is_cancelled() {
             cancelled = true;
             break;
@@ -156,9 +177,17 @@ fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(request: ScanRequ
         });
 
         let _directory_locks = match crate::file_safety::lock_directory(&directory) {
-            Ok(locks) if fs::canonicalize(&directory).is_ok_and(|p| p == directory && p.starts_with(&source_path)) => locks,
+            Ok(locks)
+                if fs::canonicalize(&directory)
+                    .is_ok_and(|p| p == directory && p.starts_with(&source_path)) =>
+            {
+                locks
+            }
             _ => {
-                errors.push(OperationError { path: directory.to_string_lossy().into_owned(), message: "Directory changed or cannot be safely opened".into() });
+                errors.push(OperationError {
+                    path: directory.to_string_lossy().into_owned(),
+                    message: "Directory changed or cannot be safely opened".into(),
+                });
                 continue;
             }
         };
@@ -174,8 +203,12 @@ fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(request: ScanRequ
         };
 
         for entry in entries {
-            if files.len() >= limits.files || errors.len() >= limits.errors || files_checked >= limits.checked {
-                truncated = true; break 'scan;
+            if files.len() >= limits.files
+                || errors.len() >= limits.errors
+                || files_checked >= limits.checked
+            {
+                truncated = true;
+                break 'scan;
             }
             if is_cancelled() {
                 cancelled = true;
@@ -204,20 +237,35 @@ fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(request: ScanRequ
                 }
             };
 
-            if file_type.is_symlink() { continue; }
+            if file_type.is_symlink() {
+                continue;
+            }
             #[cfg(windows)]
             {
                 use std::os::windows::fs::MetadataExt;
                 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
                 match entry.metadata() {
-                    Ok(metadata) if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 => continue,
-                    Err(error) => { errors.push(OperationError { path: path.to_string_lossy().into_owned(), message: error.to_string() }); continue; }
+                    Ok(metadata)
+                        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 =>
+                    {
+                        continue
+                    }
+                    Err(error) => {
+                        errors.push(OperationError {
+                            path: path.to_string_lossy().into_owned(),
+                            message: error.to_string(),
+                        });
+                        continue;
+                    }
                     _ => {}
                 }
             }
             if file_type.is_dir() {
                 if request.recursive {
-                    if directory_count >= limits.directories { truncated = true; break 'scan; }
+                    if directory_count >= limits.directories {
+                        truncated = true;
+                        break 'scan;
+                    }
                     directory_count += 1;
                     directories.push(path);
                 }
@@ -292,7 +340,9 @@ fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(request: ScanRequ
         }
     }
 
-    if truncated { errors.push(OperationError { path: source_path.to_string_lossy().into_owned(), message: "Safety limit reached: partial results only. Narrow the folder, extensions or date range.".into() }); }
+    if truncated {
+        errors.push(OperationError { path: source_path.to_string_lossy().into_owned(), message: "Safety limit reached: partial results only. Narrow the folder, extensions or date range.".into() });
+    }
 
     on_progress(ScanProgress {
         files_checked,
@@ -314,6 +364,70 @@ fn scan_files_bounded<C: Fn() -> bool, P: FnMut(ScanProgress)>(request: ScanRequ
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_scan_returns_explicit_partial_results() {
+        let temporary = TempDirectory::new();
+        for name in ["one.mp4", "two.mp4", "three.mp4"] {
+            fs::write(temporary.0.join(name), b"x").unwrap();
+        }
+        let result = scan_files_bounded(
+            request(&temporary.0, true),
+            || false,
+            |_| {},
+            ScanLimits {
+                files: 2,
+                errors: 10,
+                directories: 10,
+                checked: 100,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.files.len(), 2);
+        assert!(result.truncated);
+        assert!(!result.cancelled);
+        assert!(result
+            .errors
+            .last()
+            .unwrap()
+            .message
+            .contains("Safety limit"));
+    }
+
+    #[test]
+    fn bounded_scan_limits_directory_queue_and_checked_files() {
+        let temporary = TempDirectory::new();
+        fs::create_dir(temporary.0.join("nested")).unwrap();
+        let result = scan_files_bounded(
+            request(&temporary.0, true),
+            || false,
+            |_| {},
+            ScanLimits {
+                files: 10,
+                errors: 10,
+                directories: 1,
+                checked: 100,
+            },
+        )
+        .unwrap();
+        assert!(result.truncated);
+        fs::write(temporary.0.join("one.mp4"), b"x").unwrap();
+        fs::write(temporary.0.join("two.mp4"), b"x").unwrap();
+        let result = scan_files_bounded(
+            request(&temporary.0, false),
+            || false,
+            |_| {},
+            ScanLimits {
+                files: 10,
+                errors: 10,
+                directories: 10,
+                checked: 1,
+            },
+        )
+        .unwrap();
+        assert!(result.truncated);
+        assert_eq!(result.files_checked, 1);
+    }
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::{SystemTime, UNIX_EPOCH},

@@ -1,7 +1,7 @@
 mod copy_manager;
+mod file_safety;
 mod scanner;
 mod security;
-mod file_safety;
 
 use copy_manager::{copy_files, CopyRequest};
 use scanner::{scan_files, ScanRequest};
@@ -22,9 +22,14 @@ struct OperationState {
     session: Arc<Mutex<security::Session>>,
 }
 
-struct OperationGuard { state: OperationState, id: String }
+struct OperationGuard {
+    state: OperationState,
+    id: String,
+}
 impl Drop for OperationGuard {
-    fn drop(&mut self) { self.state.remove(&self.id); }
+    fn drop(&mut self) {
+        self.state.remove(&self.id);
+    }
 }
 
 impl OperationState {
@@ -35,7 +40,9 @@ impl OperationState {
             .operations
             .lock()
             .map_err(|_| "Operation state is unavailable")?;
-        if !operations.is_empty() { return Err("Another operation or dialog is already active".into()); }
+        if !operations.is_empty() {
+            return Err("Another operation or dialog is already active".into());
+        }
         match operations.entry(op_id.to_string()) {
             Entry::Occupied(_) => Err("Operation id is already running".into()),
             Entry::Vacant(entry) => {
@@ -126,14 +133,35 @@ async fn run_operation(
     op_id: String,
     on_progress: Channel<Value>,
 ) -> Result<Value, String> {
-    if window.label() != "main" { return Err("Unauthorized window".into()); }
-    if payload.to_string().len() > 8 * 1024 * 1024 { return Err("Request is too large".into()); }
+    if window.label() != "main" {
+        return Err("Unauthorized window".into());
+    }
+    if payload.to_string().len() > 8 * 1024 * 1024 {
+        return Err("Request is too large".into());
+    }
     let state = state.inner().clone();
     let cancelled = state.register(&op_id)?;
-    let guard = OperationGuard { state: state.clone(), id: op_id };
-    state.session.lock().map_err(|_| "Session unavailable")?.authorize(&operation, &payload)?;
+    let guard = OperationGuard {
+        state: state.clone(),
+        id: op_id,
+    };
+    state
+        .session
+        .lock()
+        .map_err(|_| "Session unavailable")?
+        .authorize(&operation, &payload)?;
     let task = tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
+        let (source, destination) = {
+            let session = state.session.lock().map_err(|_| "Session unavailable")?;
+            (session.source.clone().ok_or("Choose source folder first")?, session.destination.clone())
+        };
+        let _source_locks = file_safety::lock_directory(&source).map_err(|e| e.to_string())?;
+        let _destination_locks = if operation == "copy" {
+            Some(file_safety::lock_directory(destination.as_ref().ok_or("Choose destination folder first")?).map_err(|e| e.to_string())?)
+        } else { None };
+        // Revalidate after acquiring directory locks, before dialogs or I/O.
+        state.session.lock().map_err(|_| "Session unavailable")?.authorize(&operation, &payload)?;
         // This confirmation is trusted native UI, not JavaScript-controlled markup.
         if operation == "copy" {
             let request: CopyRequest = serde_json::from_value(payload.clone()).map_err(|e| e.to_string())?;
@@ -157,24 +185,47 @@ async fn run_operation(
 }
 
 #[tauri::command]
-async fn choose_folder(state: State<'_, OperationState>, window: WebviewWindow, kind: String) -> Result<Option<String>, String> {
-    if window.label() != "main" || (kind != "source" && kind != "destination") { return Err("Invalid folder request".into()); }
+async fn choose_folder(
+    state: State<'_, OperationState>,
+    window: WebviewWindow,
+    kind: String,
+) -> Result<Option<String>, String> {
+    if window.label() != "main" || (kind != "source" && kind != "destination") {
+        return Err("Invalid folder request".into());
+    }
     let state = state.inner().clone();
     state.register("folder-dialog")?;
-    let guard = OperationGuard { state: state.clone(), id: "folder-dialog".into() };
+    let guard = OperationGuard {
+        state: state.clone(),
+        id: "folder-dialog".into(),
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
-        let folder = window.dialog().file().set_parent(&window)
-            .set_title(if kind == "source" { "Choose source folder" } else { "Choose destination folder" })
+        let folder = window
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title(if kind == "source" {
+                "Choose source folder"
+            } else {
+                "Choose destination folder"
+            })
             .blocking_pick_folder();
         match folder {
             Some(folder) => {
                 let path = folder.into_path().map_err(|e| e.to_string())?;
-                state.session.lock().map_err(|_| "Session unavailable")?.select(&kind, path).map(Some)
+                state
+                    .session
+                    .lock()
+                    .map_err(|_| "Session unavailable")?
+                    .select(&kind, path)
+                    .map(Some)
             }
             None => Ok(None),
         }
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -187,7 +238,11 @@ pub fn run() {
     tauri::Builder::default()
         .manage(OperationState::default())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![choose_folder, run_operation, cancel_operation])
+        .invoke_handler(tauri::generate_handler![
+            choose_folder,
+            run_operation,
+            cancel_operation
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Siftly");
 }
@@ -208,6 +263,20 @@ mod tests {
         assert!(!state.register("copy-1").unwrap().load(Ordering::Relaxed));
         assert!(state.cancel("../../invalid").is_err());
         state.cancel("already-finished").unwrap();
+    }
+
+    #[test]
+    fn operation_guard_releases_slot_on_error() {
+        let state = OperationState::default();
+        state.register("first").unwrap();
+        {
+            let _guard = OperationGuard {
+                state: state.clone(),
+                id: "first".into(),
+            };
+            assert!(state.register("second").is_err());
+        }
+        assert!(state.register("second").is_ok());
     }
 
     #[test]

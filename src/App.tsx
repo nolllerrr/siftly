@@ -76,7 +76,6 @@ export default function App() {
   const [copyId, setCopyId] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("modified_time");
   const [sortAscending, setSortAscending] = useState(false);
 
@@ -117,6 +116,7 @@ export default function App() {
   }
 
   async function startScan() {
+    if (isScanning || isCopying) return;
     if (!hasNativeBridge()) {
       setFatalError("Scanning is available only in the Siftly desktop window. Run ‘pnpm tauri dev’ and use that window.");
       return;
@@ -133,6 +133,9 @@ export default function App() {
     setFatalError("");
     setErrors([]);
     setCopyResult(null);
+    setResults([]);
+    setSelected(new Set());
+    setScanStats(null);
     try {
       const result = await runOperation<ScanResult>("scan", id, {
           source,
@@ -167,7 +170,6 @@ export default function App() {
     if (!destination || selectedFiles.length === 0 || isScanning || isCopying) return;
     const id = operationId("copy");
     setCopyId(id);
-    setShowConfirm(false);
     setIsCopying(true);
     setCopyResult(null);
     setFatalError("");
@@ -252,7 +254,7 @@ export default function App() {
         ) : (
           <section className="page results-page">
             <header className="page-header results-header">
-              <div><button className="back-link" onClick={() => setPage("search")}><ChevronLeft size={15} />Search</button><h1>Results</h1><p>{scanStats?.cancelled ? "Scan cancelled — showing partial results." : "Review the matches and choose what to copy."}</p></div>
+              <div><button className="back-link" onClick={() => setPage("search")}><ChevronLeft size={15} />Search</button><h1>Results</h1><p>{scanStats?.truncated ? "Safety limit reached — partial results. Narrow your search." : scanStats?.cancelled ? "Scan cancelled — showing partial results." : "Review the matches and choose what to copy."}</p></div>
               <div className="result-actions"><button className="button secondary" onClick={() => setSelected(new Set())}>Select none</button><button className="button secondary" onClick={() => setSelected(new Set(results.map((file) => file.path)))}>Select all</button></div>
             </header>
 
@@ -277,7 +279,7 @@ export default function App() {
 
             <div className="copy-dock">
               <div><strong>{selected.size.toLocaleString()} selected</strong><span>{formatBytes(selectedBytes)}</span></div>
-              <button className="button primary" disabled={!destination || selected.size === 0 || isCopying} onClick={() => setShowConfirm(true)}><Copy size={16} />Copy selected</button>
+              <button className="button primary" disabled={!destination || selected.size === 0 || isCopying || isScanning} onClick={() => void startCopy()}><Copy size={16} />Copy selected</button>
             </div>
 
             {(isCopying || copyResult) && <CopyPanel progress={copyProgress} result={copyResult} onCancel={() => void cancelOperation(copyId)} />}
@@ -285,7 +287,6 @@ export default function App() {
         )}
       </main>
 
-      {showConfirm && <div className="modal-backdrop" role="presentation"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="copy-title"><div className="modal-icon"><Copy size={20} /></div><h2 id="copy-title">Copy {selectedFiles.length.toLocaleString()} files?</h2><p>Existing files will never be overwritten. Name collisions are resolved with a numeric suffix.</p><dl><div><dt>Destination</dt><dd title={destination}>{destination}</dd></div><div><dt>Total size</dt><dd>{formatBytes(selectedBytes)}</dd></div><div><dt>Preserve dates</dt><dd>Created, modified, accessed</dd></div></dl><div className="modal-actions"><button className="button secondary" onClick={() => setShowConfirm(false)}>Cancel</button><button className="button primary" onClick={() => void startCopy()}>Start copying</button></div></div></div>}
     </div>
   );
 }

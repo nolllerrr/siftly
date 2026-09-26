@@ -1,4 +1,185 @@
 use super::*;
+
+#[cfg(windows)]
+#[test]
+fn opened_file_must_match_expected_path() {
+    let fixture = Fixture::new();
+    let first = fixture.file("first.txt", b"one");
+    let second = fixture.file("second.txt", b"two");
+    let handle = open_source(&first).unwrap();
+    assert!(
+        crate::file_safety::verify_open_file(&handle, &fs::canonicalize(second).unwrap()).is_err()
+    );
+}
+
+#[test]
+fn oversized_copy_request_is_rejected_before_creating_destination() {
+    let fixture = Fixture::new();
+    let request = CopyRequest {
+        destination: fixture.0.join("out").to_string_lossy().into_owned(),
+        files: (0..=crate::security::MAX_FILES)
+            .map(|_| SelectedFile {
+                path: "unused".into(),
+                size: 0,
+            })
+            .collect(),
+    };
+    assert!(copy_files(request, || false, |_| {}).is_err());
+    assert!(!fixture.0.join("out").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn preserves_zone_identifier_exactly_and_keeps_existing_streams() {
+    let fixture = Fixture::new();
+    let source = fixture.file("download.txt", b"downloaded file");
+    let zone = b"[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/file\r\n";
+    fs::write(format!("{}:Zone.Identifier", source.display()), zone).unwrap();
+    fixture.file("out/download.txt", b"existing");
+    fs::write(
+        format!(
+            "{}:Zone.Identifier",
+            fixture.0.join("out/download.txt").display()
+        ),
+        b"original zone",
+    )
+    .unwrap();
+    let result = copy_files(
+        fixture.request(std::slice::from_ref(&source), "out"),
+        || false,
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(result.copied, 1, "{:?}", result.errors);
+    assert_eq!(
+        fs::read(format!(
+            "{}:Zone.Identifier",
+            fixture.0.join("out/download_1.txt").display()
+        ))
+        .unwrap(),
+        zone
+    );
+    assert_eq!(
+        fs::read(format!("{}:Zone.Identifier", source.display())).unwrap(),
+        zone
+    );
+    assert_eq!(
+        fs::read(format!(
+            "{}:Zone.Identifier",
+            fixture.0.join("out/download.txt").display()
+        ))
+        .unwrap(),
+        b"original zone"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn oversized_zone_fails_closed_and_removes_incomplete_output() {
+    let fixture = Fixture::new();
+    let source = fixture.file("download.txt", b"payload");
+    fs::write(
+        format!("{}:Zone.Identifier", source.display()),
+        vec![b'x'; 65537],
+    )
+    .unwrap();
+    let result = copy_files(
+        fixture.request(std::slice::from_ref(&source), "out"),
+        || false,
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(result.failed, 1);
+    assert_eq!(result.copied, 0);
+    assert!(result.errors[0].message.contains("Zone.Identifier"));
+    assert!(!fixture.0.join("out/download.txt").exists());
+    assert_eq!(fs::read(source).unwrap(), b"payload");
+}
+
+#[cfg(windows)]
+#[test]
+fn cleanup_marks_open_file_and_does_not_delete_a_later_replacement() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("partial.txt");
+    let output = create_destination(&path).unwrap();
+    assert!(fs::rename(&path, fixture.0.join("moved.txt")).is_err());
+    assert!(fs::remove_file(&path).is_err());
+    crate::file_safety::discard_output(&output, &path).unwrap();
+    drop(output);
+    assert!(!path.exists());
+    fs::write(&path, b"replacement").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"replacement");
+}
+
+#[cfg(windows)]
+#[test]
+fn directory_guard_prevents_rename_until_operation_finishes() {
+    let fixture = Fixture::new();
+    let directory = fixture.0.join("out");
+    fs::create_dir(&directory).unwrap();
+    let guard = crate::file_safety::lock_directory(&directory).unwrap();
+    assert!(fs::rename(&directory, fixture.0.join("moved")).is_err());
+    drop(guard);
+    fs::rename(&directory, fixture.0.join("moved")).unwrap();
+}
+
+#[test]
+fn session_only_authorizes_unique_scanned_files_and_approved_destination() {
+    let fixture = Fixture::new();
+    let source = fixture.file("source/allowed.txt", b"allowed");
+    let unscanned = fixture.file("source/unscanned.txt", b"not scanned");
+    let outside = fixture.file("outside.txt", b"outside");
+    fs::create_dir(fixture.0.join("out")).unwrap();
+    let mut session = crate::security::Session::default();
+    let source_dir = session.select("source", fixture.0.join("source")).unwrap();
+    let destination = session
+        .select("destination", fixture.0.join("out"))
+        .unwrap();
+    let scanned = crate::scanner::scan_files(
+        crate::scanner::ScanRequest {
+            source: source_dir.clone(),
+            extensions: vec![".txt".into()],
+            date_from: None,
+            date_to: None,
+            recursive: true,
+        },
+        || false,
+        |_| {},
+    )
+    .unwrap();
+    session.remember_scan(&serde_json::to_value(&scanned).unwrap());
+    // Remove one real scan entry to represent an unchecked/unreturned file.
+    session
+        .scanned
+        .remove(&fs::canonicalize(&unscanned).unwrap());
+    let source = fs::canonicalize(source).unwrap();
+    let valid = serde_json::json!({"destination": destination, "files":[{"path":source,"size":7}]});
+    assert!(session.authorize("copy", &valid).is_ok());
+    for path in [
+        fs::canonicalize(unscanned).unwrap(),
+        fs::canonicalize(outside).unwrap(),
+    ] {
+        let mut bad = valid.clone();
+        bad["files"][0]["path"] = serde_json::json!(path);
+        assert!(session.authorize("copy", &bad).is_err());
+    }
+    let mut duplicate = valid.clone();
+    duplicate["files"]
+        .as_array_mut()
+        .unwrap()
+        .push(valid["files"][0].clone());
+    assert!(session.authorize("copy", &duplicate).is_err());
+    let mut bad_destination = valid.clone();
+    bad_destination["destination"] = serde_json::json!(fixture.0);
+    assert!(session.authorize("copy", &bad_destination).is_err());
+    session
+        .authorize(
+            "scan",
+            &serde_json::json!({"source":source_dir,"extensions":[".txt"]}),
+        )
+        .unwrap();
+    assert!(session.authorize("copy", &valid).is_err());
+}
 use std::{
     io::Cursor,
     sync::{

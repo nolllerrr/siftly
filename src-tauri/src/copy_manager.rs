@@ -57,7 +57,9 @@ fn open_source(path: &Path) -> io::Result<File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_FLAG_OPEN_REPARSE_POINT};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        };
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
         options.share_mode(FILE_SHARE_READ);
     }
@@ -72,7 +74,9 @@ fn create_destination(path: &Path) -> io::Result<File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_GENERIC_WRITE, DELETE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            DELETE, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+        };
         options.access_mode(FILE_GENERIC_WRITE | DELETE);
         options.share_mode(FILE_SHARE_READ);
     }
@@ -108,14 +112,14 @@ fn reserve_destination(
         // added an entry since the directory snapshot was collected.
         match create_destination(&path) {
             Ok(file) => {
-                // Existing entries need not be retained in memory.
+                names.insert(name.to_lowercase());
                 return Ok(Some((path, file)));
             }
             Err(error)
                 if error.kind() == io::ErrorKind::AlreadyExists
                     || fs::symlink_metadata(&path).is_ok() =>
             {
-                names.insert(name.to_lowercase());
+                // Existing entries need not be retained in memory.
             }
             Err(error) => return Err(error),
         }
@@ -222,6 +226,9 @@ fn copy_one(
     is_cancelled: &impl Fn() -> bool,
     on_chunk: impl FnMut(u64),
 ) -> io::Result<Option<u64>> {
+    #[cfg(windows)]
+    crate::file_safety::copy_zone_identifier(source, destination)
+        .map_err(|error| io::Error::other(format!("Cannot preserve Zone.Identifier: {error}")))?;
     let Some(copied) = transfer(
         source,
         destination,
@@ -243,9 +250,6 @@ fn copy_one(
     if is_cancelled() {
         return Ok(None);
     }
-    #[cfg(windows)]
-    crate::file_safety::copy_zone_identifier(source, destination)
-        .map_err(|error| io::Error::other(format!("Cannot preserve Zone.Identifier: {error}")))?;
     preserve_metadata(destination, metadata)?;
     Ok(Some(copied))
 }
@@ -256,7 +260,9 @@ pub fn copy_files(
     mut on_progress: impl FnMut(CopyProgress),
 ) -> Result<CopyResult, String> {
     let started = Instant::now();
-    if request.files.len() > crate::security::MAX_FILES { return Err("Too many files in one copy operation".into()); }
+    if request.files.len() > crate::security::MAX_FILES {
+        return Err("Too many files in one copy operation".into());
+    }
     let mut result = CopyResult {
         event_type: "copy_result",
         total: request.files.len(),
@@ -279,7 +285,8 @@ pub fn copy_files(
     let destination = Path::new(&request.destination);
     fs::create_dir_all(destination)
         .map_err(|error| format!("Cannot open destination folder: {error}"))?;
-    let _destination_locks = crate::file_safety::lock_directory(destination).map_err(|e| e.to_string())?;
+    let _destination_locks =
+        crate::file_safety::lock_directory(destination).map_err(|e| e.to_string())?;
     // create_new handles existing entries; don't load an unbounded directory listing.
     let mut names = HashSet::new();
     let mut total_bytes = request
@@ -307,7 +314,11 @@ pub fn copy_files(
             current_file: filename.clone(),
         };
         on_progress(progress.clone());
-        let opened = crate::file_safety::lock_directory(source_path.parent().unwrap_or_else(|| Path::new("."))).and_then(|locks| open_source(source_path).map(|file| (file, locks))).and_then(|(file, locks)| {
+        let opened = crate::file_safety::lock_directory(
+            source_path.parent().unwrap_or_else(|| Path::new(".")),
+        )
+        .and_then(|locks| open_source(source_path).map(|file| (file, locks)))
+        .and_then(|(file, locks)| {
             let metadata = file.metadata()?;
             if !metadata.is_file() {
                 return Err(io::Error::other("Source is not a regular file"));
