@@ -287,6 +287,16 @@ docs/
 
 ---
 
+## Лицензия
+
+Siftly распространяется под лицензией [MIT](LICENSE).
+
+Copyright (c) 2026 Denis Semenov.
+
+Сторонние зависимости распространяются под собственными лицензиями.
+
+---
+
 <div align="center">
   <strong>Siftly — Find what matters.</strong>
 </div>
