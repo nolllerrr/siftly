@@ -21,6 +21,7 @@ import { ExtensionField } from "./components/ExtensionField";
 import { UpdatePanel } from "./components/UpdatePanel";
 import { version } from "../package.json";
 import { normalizeExtensions } from "./lib/extensions";
+import { displayPath } from "./lib/paths";
 import { selectAllFiles, selectedFiles as filterSelectedFiles, togglePathSelection } from "./lib/selection";
 import { copyDisplay, runOperation } from "./lib/operations";
 import type {
@@ -250,7 +251,7 @@ export default function App() {
                 <div className="operation-heading"><div><span className="status-dot pulse" />Scanning files</div><button className="button secondary danger-text" onClick={() => void cancelOperation(scanId)}><Square size={14} />Cancel scan</button></div>
                 <div className="progress-indeterminate" />
                 <div className="scan-stats"><span><strong>{scanProgress.files_checked.toLocaleString()}</strong> checked</span><span><strong>{scanProgress.files_matched.toLocaleString()}</strong> matched</span></div>
-                <p className="current-path" title={scanProgress.current_directory}>{scanProgress.current_directory}</p>
+                <p className="current-path" title={displayPath(scanProgress.current_directory)}>{displayPath(scanProgress.current_directory)}</p>
               </div>
             ) : (
               <button className="button primary main-action" disabled={isCopying || isUpdating} onClick={() => void startScan()}><Search size={17} />Scan files</button>
@@ -274,13 +275,13 @@ export default function App() {
               <div className="table-scroll">
                 <table>
                   <thead><tr><th className="check-cell"><input type="checkbox" aria-label="Select all files" checked={results.length > 0 && selected.size === results.length} onChange={(event) => setSelected(event.target.checked ? selectAllFiles(results) : new Set())} /></th><SortableHeader label="Name" active={sortKey === "name"} onClick={() => changeSort("name")} /><th>Folder</th><SortableHeader label="Size" active={sortKey === "size"} onClick={() => changeSort("size")} /><SortableHeader label="Modified" active={sortKey === "modified_time"} onClick={() => changeSort("modified_time")} /></tr></thead>
-                  <tbody>{sortedResults.map((file) => <tr key={file.path} className={selected.has(file.path) ? "selected-row" : ""}><td className="check-cell"><input type="checkbox" aria-label={`Select ${file.name}`} checked={selected.has(file.path)} onChange={() => toggleSelection(file.path)} /></td><td className="name-cell" title={file.path}><span className="file-icon"><Files size={15} /></span><span>{file.name}</span></td><td className="path-cell" title={file.parent_folder}>{file.parent_folder}</td><td className="size-cell">{formatBytes(file.size)}</td><td className="date-cell">{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(file.modified_time))}</td></tr>)}</tbody>
+                  <tbody>{sortedResults.map((file) => <tr key={file.path} className={selected.has(file.path) ? "selected-row" : ""}><td className="check-cell"><input type="checkbox" aria-label={`Select ${file.name}`} checked={selected.has(file.path)} onChange={() => toggleSelection(file.path)} /></td><td className="name-cell" title={displayPath(file.path)}><span className="file-icon"><Files size={15} /></span><span>{file.name}</span></td><td className="path-cell" title={displayPath(file.parent_folder)}>{displayPath(file.parent_folder)}</td><td className="size-cell">{formatBytes(file.size)}</td><td className="date-cell">{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(file.modified_time))}</td></tr>)}</tbody>
                 </table>
                 {results.length === 0 && <div className="empty-state"><FileSearch size={28} /><strong>No matching files</strong><span>Adjust the extensions or date range and scan again.</span></div>}
               </div>
             </div>
 
-            {errors.length > 0 && <details className="error-details"><summary>{errors.length} file system {errors.length === 1 ? "error" : "errors"}</summary>{errors.map((error, index) => <div key={`${error.path}-${index}`}><strong>{error.path}</strong><span>{error.message}</span></div>)}</details>}
+            {errors.length > 0 && <details className="error-details"><summary>{errors.length} file system {errors.length === 1 ? "error" : "errors"}</summary>{errors.map((error, index) => <div key={`${error.path}-${index}`}><strong>{displayPath(error.path)}</strong><span>{error.message}</span></div>)}</details>}
 
             <div className="copy-dock">
               <div><strong>{selected.size.toLocaleString()} selected</strong><span>{formatBytes(selectedBytes)}</span></div>
@@ -297,7 +298,7 @@ export default function App() {
 }
 
 function FolderField({ label, value, placeholder, onBrowse }: { label: string; value: string; placeholder: string; onBrowse: () => void }) {
-  return <div className="field"><label>{label}</label><div className="folder-input"><input value={value} readOnly placeholder={placeholder} title={value} /><button className="button secondary" onClick={onBrowse}><FolderOpen size={16} />Browse</button></div></div>;
+  return <div className="field"><label>{label}</label><div className="folder-input"><input value={displayPath(value)} readOnly placeholder={placeholder} title={displayPath(value)} /><button className="button secondary" onClick={onBrowse}><FolderOpen size={16} />Browse</button></div></div>;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -320,7 +321,7 @@ function CopyPanel({ progress, result, onCancel }: { progress: CopyProgress | nu
     </div>{!result && <button className="button secondary danger-text" onClick={onCancel}><Square size={14} />Cancel</button>}</div>
     <div className="progress-track"><div style={{ width: `${percentage}%` }} /></div>
     <div className="scan-stats"><span><strong>{completed} / {total}</strong> processed</span><span><strong>{formatBytes(bytes)} / {formatBytes(totalBytes)}</strong></span><span><strong>{percentage}%</strong></span></div>
-    {progress?.current_file && !result && <p className="current-path">{progress.current_file}</p>}
+    {progress?.current_file && !result && <p className="current-path">{displayPath(progress.current_file)}</p>}
     {result && <p className="copy-summary">Copied {result.copied}. Failed {result.failed}. Skipped {result.skipped}.</p>}
   </div>;
 }

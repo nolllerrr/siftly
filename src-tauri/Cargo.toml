@@ -1,6 +1,6 @@
 [package]
 name = "siftly"
-version = "0.1.0"
+version = "0.1.1"
 description = "Find. Filter. Copy. — a local file search and copy app"
 authors = ["Denis Semenov"]
 license = "MIT"

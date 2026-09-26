@@ -15,7 +15,7 @@ use std::{
     },
 };
 use tauri::{ipc::Channel, State, WebviewWindow};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::DialogExt;
 
 #[derive(Clone, Default)]
 struct OperationState {
@@ -161,17 +161,8 @@ async fn run_operation(
         let _destination_locks = if operation == "copy" {
             Some(file_safety::lock_directory(destination.as_ref().ok_or("Choose destination folder first")?).map_err(|e| e.to_string())?)
         } else { None };
-        // Revalidate after acquiring directory locks, before dialogs or I/O.
+        // Revalidate after acquiring directory locks, before I/O.
         state.session.lock().map_err(|_| "Session unavailable")?.authorize(&operation, &payload)?;
-        // This confirmation is trusted native UI, not JavaScript-controlled markup.
-        if operation == "copy" {
-            let request: CopyRequest = serde_json::from_value(payload.clone()).map_err(|e| e.to_string())?;
-            if !window.dialog().message(format!("Copy {} files from the last scan to:\n{}\n\nExisting files will not be overwritten.", request.files.len(), request.destination))
-                .title("Siftly — confirm copy").parent(&window)
-                .kind(MessageDialogKind::Warning).buttons(MessageDialogButtons::OkCancel).blocking_show() {
-                cancelled.store(true, Ordering::Relaxed);
-            }
-        }
         let result = execute_operation(&operation, payload, &cancelled, |event| {
             // A closed window should stop its background operation too.
             if on_progress.send(event).is_err() {
