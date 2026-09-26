@@ -12,6 +12,8 @@
 
 ## Новый релиз
 
+Если запуск от тега не появился, используйте GitHub Actions → Windows release → Run workflow и укажите уже существующий тег. Ручной запуск собирает исходники именно этого тега, а не текущую ветку; повторная сборка предназначена только для ещё не опубликованного черновика.
+
 1. Измените версию одновременно в `package.json`, `src-tauri/tauri.conf.json` и `src-tauri/Cargo.toml`; обновите Cargo.lock командой `cargo check --manifest-path src-tauri/Cargo.toml`.
 2. Проверьте `pnpm test`, `pnpm build`, `cargo test --manifest-path src-tauri/Cargo.toml --locked`.
 3. Закоммитьте и отправьте изменения. Создайте и отправьте соответствующий тег, например для версии 0.1.1:

@@ -1,6 +1,12 @@
 name: Windows release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (for example v0.1.0)
+        required: true
+        type: string
   push:
     tags:
       - 'v[0-9]*'
@@ -9,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -23,6 +29,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
@@ -35,7 +42,7 @@ jobs:
       - name: Validate release versions
         run: node scripts/check-release.mjs
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
@@ -56,8 +63,8 @@ jobs:
         with:
           tauriScript: node node_modules/@tauri-apps/cli/tauri.js
           args: --ci -- --locked
-          tagName: ${{ github.ref_name }}
-          releaseName: Siftly ${{ github.ref_name }}
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: Siftly ${{ inputs.tag || github.ref_name }}
           releaseDraft: true
           prerelease: false
           generateReleaseNotes: true
