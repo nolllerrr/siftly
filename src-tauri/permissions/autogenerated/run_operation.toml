@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-run-operation"
+description = "Enables the run_operation command without any pre-configured scope."
+commands.allow = ["run_operation"]
+
+[[permission]]
+identifier = "deny-run-operation"
+description = "Denies the run_operation command without any pre-configured scope."
+commands.deny = ["run_operation"]

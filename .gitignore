@@ -1,0 +1,22 @@
+# Safe secrets
+.env
+.env.*
+!.env.example
+src-tauri/gen/
+
+# Local development tracking
+development_plan.md
+
+# Frontend / Tauri build output
+node_modules/
+dist/
+src-tauri/target/
+
+# Databases & Logs
+*.log
+*.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
+.vs/
