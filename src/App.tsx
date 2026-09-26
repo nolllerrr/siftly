@@ -18,6 +18,8 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { DatePicker, formatDateValue } from "./components/DatePicker";
 import { ExtensionField } from "./components/ExtensionField";
+import { UpdatePanel } from "./components/UpdatePanel";
+import { version } from "../package.json";
 import { normalizeExtensions } from "./lib/extensions";
 import { selectAllFiles, selectedFiles as filterSelectedFiles, togglePathSelection } from "./lib/selection";
 import { copyDisplay, runOperation } from "./lib/operations";
@@ -76,6 +78,7 @@ export default function App() {
   const [copyId, setCopyId] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("modified_time");
   const [sortAscending, setSortAscending] = useState(false);
 
@@ -100,6 +103,7 @@ export default function App() {
   const totalBytes = results.reduce((sum, file) => sum + file.size, 0);
 
   async function chooseFolder(kind: "source" | "destination") {
+    if (isUpdating) return;
     if (!hasNativeBridge()) {
       setFatalError("Folder selection is available in the Siftly desktop window. Start it with ‘pnpm tauri dev’ and do not use the localhost browser tab.");
       return;
@@ -116,7 +120,7 @@ export default function App() {
   }
 
   async function startScan() {
-    if (isScanning || isCopying) return;
+    if (isScanning || isCopying || isUpdating) return;
     if (!hasNativeBridge()) {
       setFatalError("Scanning is available only in the Siftly desktop window. Run ‘pnpm tauri dev’ and use that window.");
       return;
@@ -167,7 +171,7 @@ export default function App() {
   }
 
   async function startCopy() {
-    if (!destination || selectedFiles.length === 0 || isScanning || isCopying) return;
+    if (!destination || selectedFiles.length === 0 || isScanning || isCopying || isUpdating) return;
     const id = operationId("copy");
     setCopyId(id);
     setIsCopying(true);
@@ -210,10 +214,11 @@ export default function App() {
           <button className={page === "results" ? "nav-item active" : "nav-item"} onClick={() => setPage("results")} disabled={!scanStats}><Files size={16} />Results{results.length > 0 && <span className="nav-count">{results.length}</span>}</button>
         </nav>
         <div className="sidebar-bottom">
+          <UpdatePanel busy={isScanning || isCopying} onInstallingChange={setIsUpdating} />
           <button className="theme-toggle" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}>
             {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}{theme === "light" ? "Dark" : "Light"} theme
           </button>
-          <span>Siftly 0.1.0 · MVP</span>
+          <span>Siftly {version} · MVP</span>
         </div>
       </aside>
 
@@ -248,7 +253,7 @@ export default function App() {
                 <p className="current-path" title={scanProgress.current_directory}>{scanProgress.current_directory}</p>
               </div>
             ) : (
-              <button className="button primary main-action" onClick={() => void startScan()}><Search size={17} />Scan files</button>
+              <button className="button primary main-action" disabled={isCopying || isUpdating} onClick={() => void startScan()}><Search size={17} />Scan files</button>
             )}
           </section>
         ) : (
@@ -279,7 +284,7 @@ export default function App() {
 
             <div className="copy-dock">
               <div><strong>{selected.size.toLocaleString()} selected</strong><span>{formatBytes(selectedBytes)}</span></div>
-              <button className="button primary" disabled={!destination || selected.size === 0 || isCopying || isScanning} onClick={() => void startCopy()}><Copy size={16} />Copy selected</button>
+              <button className="button primary" disabled={!destination || selected.size === 0 || isCopying || isScanning || isUpdating} onClick={() => void startCopy()}><Copy size={16} />Copy selected</button>
             </div>
 
             {(isCopying || copyResult) && <CopyPanel progress={copyProgress} result={copyResult} onCancel={() => void cancelOperation(copyId)} />}

@@ -19,8 +19,19 @@ describe("desktop security configuration", () => {
   it("exposes only explicit application commands to the main local window", () => {
     expect(capability.windows).toEqual(["main"]);
     expect(capability.remote).toBeUndefined();
-    expect(capability.permissions).toEqual(["core:default", "allow-choose-folder", "allow-run-operation", "allow-cancel-operation"]);
+    expect(capability.permissions).toEqual(["core:default", "allow-choose-folder", "allow-run-operation", "allow-cancel-operation", "allow-check-for-updates", "allow-install-update"]);
     expect(buildScript).toContain("AppManifest::new().commands");
-    for (const command of ["choose_folder", "run_operation", "cancel_operation"]) expect(buildScript).toContain(`"${command}"`);
+    for (const command of ["choose_folder", "run_operation", "cancel_operation", "check_for_updates", "install_update"]) expect(buildScript).toContain(`"${command}"`);
+  });
+  it("requires signed versions and a fixed public release endpoint", () => {
+    const updater = config.plugins.updater;
+    expect(updater.endpoints).toEqual(["https://github.com/nolllerrr/siftly/releases/latest/download/latest.json"]);
+    expect(updater.requireSignedVersion).toBe(true);
+    expect(updater.pubkey.length).toBeGreaterThan(80);
+    expect(updater.dangerousInsecureTransportProtocol).toBeFalsy();
+    expect(updater.dangerousAcceptInvalidCerts).toBeFalsy();
+    expect(updater.dangerousAcceptInvalidHostnames).toBeFalsy();
+    expect(updater.allowDowngrades).toBeFalsy();
+    expect(config.bundle.createUpdaterArtifacts).toBe(true);
   });
 });

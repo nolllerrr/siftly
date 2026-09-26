@@ -1,4 +1,7 @@
 # Safe secrets
+*.key
+*.key.pub
+.siftly-signing/
 .env
 .env.*
 !.env.example

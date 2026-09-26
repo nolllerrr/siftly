@@ -2,6 +2,7 @@ mod copy_manager;
 mod file_safety;
 mod scanner;
 mod security;
+mod updates;
 
 use copy_manager::{copy_files, CopyRequest};
 use scanner::{scan_files, ScanRequest};
@@ -237,11 +238,15 @@ fn cancel_operation(state: State<'_, OperationState>, op_id: String) -> Result<(
 pub fn run() {
     tauri::Builder::default()
         .manage(OperationState::default())
+        .manage(updates::UpdateState::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             choose_folder,
             run_operation,
-            cancel_operation
+            cancel_operation,
+            updates::check_for_updates,
+            updates::install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running Siftly");

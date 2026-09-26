@@ -4,6 +4,8 @@ fn main() {
             "choose_folder",
             "run_operation",
             "cancel_operation",
+            "check_for_updates",
+            "install_update",
         ]),
     ))
     .expect("Tauri build failed")

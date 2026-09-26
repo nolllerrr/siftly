@@ -7,6 +7,8 @@
     "core:default",
     "allow-choose-folder",
     "allow-run-operation",
-    "allow-cancel-operation"
+    "allow-cancel-operation",
+    "allow-check-for-updates",
+    "allow-install-update"
   ]
 }
