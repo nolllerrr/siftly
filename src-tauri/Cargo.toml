@@ -1,6 +1,6 @@
 [package]
 name = "siftly"
-version = "0.1.1"
+version = "0.1.2"
 description = "Find. Filter. Copy. — a local file search and copy app"
 authors = ["Denis Semenov"]
 license = "MIT"
@@ -22,6 +22,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "~2.12.0"
 
 [target.'cfg(windows)'.dependencies]
+webview2-com = "=0.38.2"
+windows = { version = "0.61", features = ["Win32_UI_Shell"] }
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [profile.release]

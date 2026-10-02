@@ -3,6 +3,8 @@ mod file_safety;
 mod scanner;
 mod security;
 mod updates;
+#[cfg(windows)]
+mod webview_runtime;
 
 use copy_manager::{copy_files, CopyRequest};
 use scanner::{scan_files, ScanRequest};
@@ -227,6 +229,10 @@ fn cancel_operation(state: State<'_, OperationState>, op_id: String) -> Result<(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Configure the fallback before Tauri or its plugins start any threads.
+    #[cfg(windows)]
+    webview_runtime::prepare();
+
     tauri::Builder::default()
         .manage(OperationState::default())
         .manage(updates::UpdateState::default())
